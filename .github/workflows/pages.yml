@@ -80,3 +80,5 @@ jobs:
         uses: actions/deploy-pages@v4
         with:
           preview: true
+        with:
+          preview: ${{ github.event_name == 'pull_request' }}
