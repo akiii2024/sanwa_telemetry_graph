@@ -38,6 +38,63 @@ header p {
   color: var(--muted);
 }
 
+/* セッション保存・読み込みボタン */
+.session-controls {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.session-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.session-btn:active {
+  transform: scale(0.96);
+}
+
+.session-btn.save {
+  background: linear-gradient(135deg, #66c2ff, #4a9de5);
+  color: #05121a;
+  box-shadow: 0 4px 16px rgba(102, 194, 255, 0.3);
+}
+
+.session-btn.save:hover:not(:disabled) {
+  box-shadow: 0 6px 24px rgba(102, 194, 255, 0.45);
+}
+
+.session-btn.save:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.session-btn.load {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.session-btn.load:hover {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.12));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.session-icon {
+  font-size: 16px;
+}
+
 main {
   display: grid;
   gap: 20px;
@@ -103,6 +160,76 @@ input[type="file"] {
   align-items: center;
 }
 
+.file-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.metric-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.metric-option {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.metric-option input {
+  accent-color: var(--accent);
+}
+
+/* ズームコントロール */
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.zoom-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zoom-controls input[type="range"] {
+  width: 100px;
+}
+
+.zoom-controls input[type="number"] {
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.zoom-controls input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.zoom-hint {
+  padding: 4px 10px;
+  background: rgba(102, 194, 255, 0.15);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+
 .controls button {
   background: var(--accent);
   color: #05121a;
@@ -162,35 +289,62 @@ svg {
   letter-spacing: 0.08em;
 }
 
-.replay-bar {
+.steer-track {
   position: relative;
   height: 28px;
-  background: rgba(255, 255, 255, 0.08);
   border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
 
-.replay-bar.dual {
-  height: 26px;
-}
-
-.replay-bar .baseline {
+.steer-center {
   position: absolute;
   left: 50%;
-  top: 4px;
-  bottom: 4px;
-  width: 1px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
   background: rgba(255, 255, 255, 0.35);
 }
 
-.replay-bar .bar-fill {
+.steer-handle {
   position: absolute;
-  left: 50%;
   top: 4px;
-  bottom: 4px;
-  width: 50%;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  width: 16px;
+  height: 20px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fef9f0, #cbd7ff);
+  box-shadow: 0 0 12px rgba(102, 194, 255, 0.45);
+  transform: translateX(-50%);
+}
+
+.throttle-bars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.throttle-half {
+  position: relative;
+  height: 26px;
   border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.throttle-fill {
+  position: absolute;
+  inset: 4px 4px 4px 4px;
+  border-radius: 999px;
+  transform-origin: left center;
+}
+
+.throttle-fill.brake {
+  background: linear-gradient(90deg, #ff6b6b, #ffb454);
+  transform-origin: right center;
+}
+
+.throttle-fill.accel {
+  background: linear-gradient(90deg, #66c2ff, #7ce38b);
 }
 
 .replay-metrics {
@@ -241,4 +395,309 @@ svg {
   .full {
     grid-column: 1 / -1;
   }
+}
+
+/* コースマップ用スタイル */
+.course-map-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.course-map-controls input[type="number"] {
+  width: 70px;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.course-map-controls input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.course-map-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.course-map-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+
+.course-map-container {
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.course-map-svg {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  background: var(--panel-2);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  touch-action: none;
+}
+
+.course-svg-layer {
+  opacity: 0.9;
+}
+
+.course-map-svg.svg-map {
+  background: #ffffff;
+}
+
+
+.course-map-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  background: var(--panel-2);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.image-course-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: start;
+}
+
+.image-preview {
+  position: relative;
+  padding: 8px;
+  background: var(--panel-2);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.image-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.draw-canvas {
+  position: absolute;
+  inset: 8px;
+  width: calc(100% - 16px);
+  height: calc(100% - 16px);
+  border-radius: 8px;
+  cursor: crosshair;
+}
+
+/* 周期性予測パネル */
+.prediction-panel h2 {
+  color: #caa6ff;
+}
+
+.stat-card.prediction {
+  border-left: 3px solid #caa6ff;
+  background: linear-gradient(135deg, rgba(202, 166, 255, 0.08), rgba(16, 21, 29, 0.95));
+}
+
+.stat-card.prediction span {
+  color: #caa6ff;
+}
+
+.stat-card.prediction strong {
+  color: #f4f6fb;
+  font-size: 20px;
+}
+
+.prediction-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* コースマップ編集用スタイル */
+.course-map-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.course-map-toolbar button {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.course-map-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.course-map-toolbar button.primary {
+  background: var(--accent);
+  color: #05121a;
+}
+
+.course-map-toolbar button.danger {
+  background: rgba(255, 107, 107, 0.8);
+  color: #fff;
+}
+
+.course-map-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.course-map-toolbar .file-input-label {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.course-map-toolbar .file-input-label:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.course-map-toolbar input[type="file"] {
+  display: none;
+}
+
+/* 編集モードのSVG */
+.course-map-svg.editing {
+  cursor: default;
+}
+
+/* 編集ハンドル */
+.course-edit-handle {
+  cursor: grab;
+  transition: r 0.1s ease;
+}
+
+.course-edit-handle:hover {
+  r: 8;
+}
+
+.course-edit-handle.dragging {
+  cursor: grabbing;
+}
+
+/* 編集モード表示バッジ */
+.course-edit-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  background: rgba(102, 194, 255, 0.2);
+  color: var(--accent);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 動画パネル */
+.video-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.video-controls {
+  flex-wrap: wrap;
+}
+
+.video-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.video-controls select {
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.video-controls input[type="number"] {
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.video-controls input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.offset-fine-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.offset-fine-controls button {
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+  border-radius: 6px !important;
+}
+
+.video-container {
+  position: relative;
+  width: 100%;
+  max-width: 800px;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.video-container video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+
+.video-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  background: var(--panel-2);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.controls button.secondary.danger {
+  background: rgba(255, 107, 107, 0.3);
+  color: #ff6b6b;
 }
