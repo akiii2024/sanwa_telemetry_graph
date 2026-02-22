@@ -298,6 +298,100 @@ function detectStraightSections(rows, stMetric, minDurationMs = 500) {
   return straights;
 }
 
+// 位相最適化＋テンプレートマッチングでラップ境界を検出する関数
+// 1) 信号を周期ごとに分割する最適な開始位置（位相）を見つける
+// 2) 全セグメントの平均テンプレートを作成
+// 3) 各境界を局所的に微調整
+function findLapBoundariesByTemplate(normalized, periodSamples, sampleIntervalMs) {
+  const n = normalized.length;
+  if (periodSamples < 10 || n < periodSamples * 2) return [];
+
+  // ─── Step 1: 最適な位相を探索 ───
+  // 各候補位相で、隣接セグメント間の平均NCCを計算
+  const evalPhase = (phase) => {
+    const segCount = Math.floor((n - phase) / periodSamples);
+    if (segCount < 2) return -Infinity;
+    let total = 0;
+    for (let a = 0; a < segCount - 1; a++) {
+      const s1 = phase + a * periodSamples;
+      const s2 = phase + (a + 1) * periodSamples;
+      let dot = 0, n1 = 0, n2 = 0;
+      for (let j = 0; j < periodSamples; j++) {
+        dot += normalized[s1 + j] * normalized[s2 + j];
+        n1 += normalized[s1 + j] * normalized[s1 + j];
+        n2 += normalized[s2 + j] * normalized[s2 + j];
+      }
+      total += dot / (Math.sqrt(n1 * n2) || 1);
+    }
+    return total / (segCount - 1);
+  };
+
+  const phaseStep = Math.max(1, Math.floor(periodSamples / 100));
+  let bestPhase = 0;
+  let bestScore = -Infinity;
+
+  // 粗探索
+  for (let phase = 0; phase < periodSamples; phase += phaseStep) {
+    const score = evalPhase(phase);
+    if (score > bestScore) { bestScore = score; bestPhase = phase; }
+  }
+  // 細密探索
+  for (let phase = Math.max(0, bestPhase - phaseStep); phase <= Math.min(periodSamples - 1, bestPhase + phaseStep); phase++) {
+    const score = evalPhase(phase);
+    if (score > bestScore) { bestScore = score; bestPhase = phase; }
+  }
+
+  // ─── Step 2: 平均テンプレートを構築 ───
+  const segCount = Math.floor((n - bestPhase) / periodSamples);
+  if (segCount < 2) return [];
+
+  const template = new Array(periodSamples).fill(0);
+  for (let seg = 0; seg < segCount; seg++) {
+    const start = bestPhase + seg * periodSamples;
+    for (let j = 0; j < periodSamples; j++) {
+      template[j] += normalized[start + j];
+    }
+  }
+  for (let j = 0; j < periodSamples; j++) template[j] /= segCount;
+
+  let tNormSq = 0;
+  for (let i = 0; i < periodSamples; i++) tNormSq += template[i] * template[i];
+  const tNorm = Math.sqrt(tNormSq) || 1;
+
+  // ─── Step 3: 各ラップ境界を局所最適化 ───
+  const searchRadius = Math.floor(periodSamples * 0.15);
+  const boundaries = [];
+
+  for (let lap = 0; lap <= segCount; lap++) {
+    const expected = bestPhase + lap * periodSamples;
+
+    // 最後の境界: テンプレート長分のデータが残っていない場合はそのまま
+    if (expected + periodSamples > n) {
+      if (expected <= n) boundaries.push(expected * sampleIntervalMs);
+      break;
+    }
+
+    const lo = Math.max(0, expected - searchRadius);
+    const hi = Math.min(n - periodSamples, expected + searchRadius);
+    let bestOff = expected;
+    let bestNcc = -Infinity;
+
+    for (let off = lo; off <= hi; off++) {
+      let dot = 0, ssq = 0;
+      for (let j = 0; j < periodSamples; j++) {
+        dot += template[j] * normalized[off + j];
+        ssq += normalized[off + j] * normalized[off + j];
+      }
+      const ncc = dot / (tNorm * (Math.sqrt(ssq) || 1));
+      if (ncc > bestNcc) { bestNcc = ncc; bestOff = off; }
+    }
+
+    boundaries.push(bestOff * sampleIntervalMs);
+  }
+
+  return boundaries.length >= 2 ? boundaries : [];
+}
+
 // 操作の周期性からラップを予測する関数
 function predictLapsFromPeriodicity(rows) {
   const emptyResult = {
@@ -369,107 +463,127 @@ function predictLapsFromPeriodicity(rows) {
   const variance = normalized.reduce((sum, v) => sum + v * v, 0) / normalized.length;
   const corrRatio = variance > 0 ? bestCorr / variance : 0;
 
-  // 信頼性が低い場合でも、検出周期からの推定値は返す
-  if (corrRatio < 0.2 || detectedPeriodMs < 5000) {
-    // 最低限の推定（信頼性低）
+  // 信頼性が低すぎる場合はここで終了
+  if (corrRatio < 0.15 || detectedPeriodMs < 5000) {
     const totalDurationMs = rows[rows.length - 1].__recMs - rows[0].__recMs;
-    const estimatedLapCount = detectedPeriodMs > 0 ? Math.floor(totalDurationMs / detectedPeriodMs) : 0;
+    const lapCount = detectedPeriodMs > 0 ? Math.floor(totalDurationMs / detectedPeriodMs) : 0;
     return {
-      predictedLapCount: estimatedLapCount,
-      predictedBestLap: detectedPeriodMs > 0 ? detectedPeriodMs : null,
-      predictedAverageLap: detectedPeriodMs > 0 ? detectedPeriodMs : null,
+      predictedLapCount: lapCount,
+      predictedBestLap: lapCount > 0 ? detectedPeriodMs : null,
+      predictedAverageLap: lapCount > 0 ? detectedPeriodMs : null,
       detectedPeriodMs,
       lapTimes: [],
-      lowConfidence: true, // 信頼性が低いことを示すフラグ
+      lowConfidence: true,
     };
   }
 
-  // ストレート区間を検出（最低500ms以上の直進区間）
-  const straights = detectStraightSections(rows, stMetric, 500);
+  // === テンプレートマッチングでラップ境界を検出 ===
+  const periodSamples = Math.round(detectedPeriodMs / sampleIntervalMs);
+  const templateBoundaries = findLapBoundariesByTemplate(normalized, periodSamples, sampleIntervalMs);
 
-  if (straights.length < 2) {
-    // ストレートが少なすぎる場合は従来の周期ベース推定にフォールバック
-    const totalDurationMs = rows[rows.length - 1].__recMs - rows[0].__recMs;
-    const predictedLapCount = Math.floor(totalDurationMs / detectedPeriodMs);
-    return {
-      predictedLapCount,
-      predictedBestLap: detectedPeriodMs,
-      predictedAverageLap: detectedPeriodMs,
-      detectedPeriodMs,
-      lapTimes: [],
-    };
-  }
+  if (templateBoundaries.length >= 2) {
+    // テンプレートマッチング成功: 各ピーク間隔からラップタイムを算出
+    const startMs = rows[0].__recMs;
+    const lapTimes = [];
+    for (let i = 0; i < templateBoundaries.length - 1; i++) {
+      const lapStartMs = startMs + templateBoundaries[i];
+      const lapEndMs = startMs + templateBoundaries[i + 1];
+      const durationMs = lapEndMs - lapStartMs;
+      // 周期の50%〜200%の範囲のラップのみ有効とする
+      if (durationMs >= detectedPeriodMs * 0.5 && durationMs <= detectedPeriodMs * 2.0) {
+        lapTimes.push({
+          lap: lapTimes.length + 1,
+          startMs: lapStartMs,
+          endMs: lapEndMs,
+          durationMs: durationMs,
+        });
+      }
+    }
 
-  // 最も長いストレートを「メインストレート」として特定
-  const sortedByDuration = [...straights].sort((a, b) => b.durationMs - a.durationMs);
-  const mainStraightDuration = sortedByDuration[0].durationMs;
-  // メインストレートの80%以上の長さを持つストレートを候補とする
-  const mainStraightThreshold = mainStraightDuration * 0.6;
-  const mainStraights = straights.filter(s => s.durationMs >= mainStraightThreshold);
-
-  if (mainStraights.length < 2) {
-    // メインストレートが1つしかない
-    const totalDurationMs = rows[rows.length - 1].__recMs - rows[0].__recMs;
-    const predictedLapCount = Math.floor(totalDurationMs / detectedPeriodMs);
-    return {
-      predictedLapCount,
-      predictedBestLap: detectedPeriodMs,
-      predictedAverageLap: detectedPeriodMs,
-      detectedPeriodMs,
-      lapTimes: [],
-    };
-  }
-
-  // メインストレートの間隔が周期に近いものだけを抽出（誤検出を防ぐ）
-  const validMainStraights = [mainStraights[0]];
-  for (let i = 1; i < mainStraights.length; i++) {
-    const interval = mainStraights[i].centerMs - validMainStraights[validMainStraights.length - 1].centerMs;
-    // 周期の50%〜150%の範囲内であれば有効
-    if (interval >= detectedPeriodMs * 0.5 && interval <= detectedPeriodMs * 1.5) {
-      validMainStraights.push(mainStraights[i]);
+    if (lapTimes.length >= 1) {
+      const bestLapTime = Math.min(...lapTimes.map(l => l.durationMs));
+      const averageLapTime = lapTimes.reduce((sum, l) => sum + l.durationMs, 0) / lapTimes.length;
+      return {
+        predictedLapCount: lapTimes.length,
+        predictedBestLap: bestLapTime,
+        predictedAverageLap: averageLapTime,
+        detectedPeriodMs,
+        lapTimes,
+        method: 'template', // テンプレートマッチングで検出
+      };
     }
   }
 
-  if (validMainStraights.length < 2) {
-    const totalDurationMs = rows[rows.length - 1].__recMs - rows[0].__recMs;
-    const predictedLapCount = Math.floor(totalDurationMs / detectedPeriodMs);
-    return {
-      predictedLapCount,
-      predictedBestLap: detectedPeriodMs,
-      predictedAverageLap: detectedPeriodMs,
-      detectedPeriodMs,
-      lapTimes: [],
-    };
+  // === フォールバック: ストレート検出ベースのラップ境界 ===
+  const straights = detectStraightSections(rows, stMetric, 500);
+
+  if (straights.length >= 2) {
+    const sortedByDuration = [...straights].sort((a, b) => b.durationMs - a.durationMs);
+    const mainStraightDuration = sortedByDuration[0].durationMs;
+    const mainStraightThreshold = mainStraightDuration * 0.6;
+    const mainStraights = straights.filter(s => s.durationMs >= mainStraightThreshold);
+
+    if (mainStraights.length >= 2) {
+      const validMainStraights = [mainStraights[0]];
+      for (let i = 1; i < mainStraights.length; i++) {
+        const interval = mainStraights[i].centerMs - validMainStraights[validMainStraights.length - 1].centerMs;
+        if (interval >= detectedPeriodMs * 0.5 && interval <= detectedPeriodMs * 1.5) {
+          validMainStraights.push(mainStraights[i]);
+        }
+      }
+
+      if (validMainStraights.length >= 2) {
+        const lapTimes = [];
+        for (let i = 0; i < validMainStraights.length - 1; i++) {
+          const lapStartMs = validMainStraights[i].endMs;
+          const lapEndMs = validMainStraights[i + 1].endMs;
+          lapTimes.push({
+            lap: i + 1,
+            startMs: lapStartMs,
+            endMs: lapEndMs,
+            durationMs: lapEndMs - lapStartMs,
+          });
+        }
+
+        if (lapTimes.length > 0) {
+          const bestLapTime = Math.min(...lapTimes.map(l => l.durationMs));
+          const averageLapTime = lapTimes.reduce((sum, l) => sum + l.durationMs, 0) / lapTimes.length;
+          return {
+            predictedLapCount: lapTimes.length,
+            predictedBestLap: bestLapTime,
+            predictedAverageLap: averageLapTime,
+            detectedPeriodMs,
+            lapTimes,
+            method: 'straight', // ストレート検出で検出
+          };
+        }
+      }
+    }
   }
 
-  // 各ラップタイムを計算（ストレート終了地点をラップの区切りとする）
+  // === 最終フォールバック: 等間隔分割 ===
+  const totalDurationMs = rows[rows.length - 1].__recMs - rows[0].__recMs;
+  const lapCount = Math.floor(totalDurationMs / detectedPeriodMs);
+  if (lapCount < 1) return emptyResult;
+
   const lapTimes = [];
-  for (let i = 0; i < validMainStraights.length - 1; i++) {
-    const lapStartMs = validMainStraights[i].endMs;
-    const lapEndMs = validMainStraights[i + 1].endMs;
-    const durationMs = lapEndMs - lapStartMs;
+  const startMs = rows[0].__recMs;
+  for (let i = 0; i < lapCount; i++) {
     lapTimes.push({
       lap: i + 1,
-      startMs: lapStartMs,
-      endMs: lapEndMs,
-      durationMs: durationMs,
+      startMs: startMs + detectedPeriodMs * i,
+      endMs: startMs + detectedPeriodMs * (i + 1),
+      durationMs: detectedPeriodMs,
     });
   }
-
-  if (lapTimes.length === 0) {
-    return emptyResult;
-  }
-
-  // ベストラップとアベレージラップを計算
-  const bestLapTime = Math.min(...lapTimes.map(l => l.durationMs));
-  const averageLapTime = lapTimes.reduce((sum, l) => sum + l.durationMs, 0) / lapTimes.length;
-
   return {
-    predictedLapCount: lapTimes.length,
-    predictedBestLap: bestLapTime,
-    predictedAverageLap: averageLapTime,
+    predictedLapCount: lapCount,
+    predictedBestLap: detectedPeriodMs,
+    predictedAverageLap: detectedPeriodMs,
     detectedPeriodMs,
     lapTimes,
+    method: 'period', // 等間隔で推定
+    lowConfidence: true,
   };
 }
 
@@ -1287,6 +1401,27 @@ function App() {
   const thBrakeScale = Math.min(1, Math.max(0, -thValue / thMax));
   const thAccelScale = Math.min(1, Math.max(0, thValue / thMax));
 
+  // 現在のラップ情報を計算
+  const currentLapInfo = useMemo(() => {
+    const laps = periodicityPrediction.lapTimes;
+    if (!laps || !laps.length) return null;
+    for (let i = 0; i < laps.length; i++) {
+      if (playTime >= laps[i].startMs && playTime < laps[i].endMs) {
+        return {
+          lapNumber: laps[i].lap,
+          totalLaps: laps.length,
+          elapsedMs: playTime - laps[i].startMs,
+          durationMs: laps[i].durationMs,
+        };
+      }
+    }
+    // ラップ範囲外（開始前・終了後）
+    if (playTime < laps[0].startMs) {
+      return { lapNumber: 0, totalLaps: laps.length, elapsedMs: 0, durationMs: 0, beforeStart: true };
+    }
+    return { lapNumber: laps.length, totalLaps: laps.length, elapsedMs: 0, durationMs: 0, afterEnd: true };
+  }, [playTime, periodicityPrediction.lapTimes]);
+
   const handleFile = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -1591,15 +1726,15 @@ function App() {
         {/* 周期性から予測したラップ情報 */}
         {periodicityPrediction.predictedLapCount > 0 && (
           <section className="panel prediction-panel">
-            <h2>周期性予測（操作パターンから推定）</h2>
+            <h2>周期性予測（操作パターンから推定）{periodicityPrediction.lowConfidence ? ' ⚠️' : ''}</h2>
             <div className="stats">
               <div className="stat-card prediction">
                 <span>予測LAP数</span>
                 <strong>{periodicityPrediction.predictedLapCount}</strong>
               </div>
-              <div className="stat-card prediction">
+              <div className="stat-card prediction" style={{ borderColor: '#7ce38b' }}>
                 <span>予測BEST LAP</span>
-                <strong>{periodicityPrediction.predictedBestLap ? formatMs(periodicityPrediction.predictedBestLap) : '-'}</strong>
+                <strong style={{ color: '#7ce38b' }}>{periodicityPrediction.predictedBestLap ? formatMs(periodicityPrediction.predictedBestLap) : '-'}</strong>
               </div>
               <div className="stat-card prediction">
                 <span>予測AVERAGE LAP</span>
@@ -1610,8 +1745,39 @@ function App() {
                 <strong>{(periodicityPrediction.detectedPeriodMs / 1000).toFixed(2)}秒</strong>
               </div>
             </div>
+            {periodicityPrediction.lapTimes.length > 0 && (
+              <div className="lap-times-list" style={{ marginTop: '12px' }}>
+                <h3 style={{ fontSize: '0.95rem', marginBottom: '8px', color: '#aaa' }}>各ラップタイム</h3>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {periodicityPrediction.lapTimes.map((lt) => {
+                    const isBest = lt.durationMs === periodicityPrediction.predictedBestLap;
+                    return (
+                      <div
+                        key={lt.lap}
+                        className="stat-card prediction"
+                        style={{
+                          minWidth: '100px',
+                          flex: '0 0 auto',
+                          borderColor: isBest ? '#7ce38b' : undefined,
+                          background: isBest ? 'rgba(124,227,139,0.08)' : undefined,
+                        }}
+                      >
+                        <span>Lap {lt.lap}</span>
+                        <strong style={{ color: isBest ? '#7ce38b' : undefined }}>{formatMs(lt.durationMs)}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <p className="prediction-note">
-              ※ステアリング操作の周期性から自動的に推定しています
+              {periodicityPrediction.lowConfidence
+                ? '⚠️ 信頼性が低い推定です（周期性の相関が弱い）。参考値としてご使用ください。'
+                : periodicityPrediction.method === 'template'
+                  ? '🎯 テンプレートマッチングで各ラップ境界を検出しました'
+                  : periodicityPrediction.method === 'straight'
+                    ? '📏 ストレート区間から各ラップ境界を検出しました'
+                    : '※ステアリング操作の周期性から自動的に推定しています'}
             </p>
             <button
               className="secondary"
@@ -1822,6 +1988,30 @@ function App() {
                 />
               </label>
             </div>
+            {currentLapInfo && (
+              <div className="current-lap-indicator">
+                <div className="current-lap-badge">
+                  <span className="current-lap-label">
+                    {currentLapInfo.beforeStart ? 'スタート前' :
+                      currentLapInfo.afterEnd ? '走行終了' :
+                        `Lap ${currentLapInfo.lapNumber} / ${currentLapInfo.totalLaps}`}
+                  </span>
+                  {!currentLapInfo.beforeStart && !currentLapInfo.afterEnd && (
+                    <span className="current-lap-time">
+                      {formatMs(currentLapInfo.elapsedMs)}
+                    </span>
+                  )}
+                </div>
+                {!currentLapInfo.beforeStart && !currentLapInfo.afterEnd && (
+                  <div className="lap-progress-bar">
+                    <div
+                      className="lap-progress-fill"
+                      style={{ width: `${Math.min(100, (currentLapInfo.elapsedMs / currentLapInfo.durationMs) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
             {hasSt ? (
               <div className="replay-row">
                 <div className="replay-label">ST(%)</div>
@@ -1829,7 +2019,7 @@ function App() {
                   <span className="steer-center" />
                   <span
                     className="steer-handle"
-                    style={{ left: `calc(50% + ${stOffset * 50}%)` }}
+                    style={{ left: `calc(50% + ${-stOffset * 50}%)` }}
                   />
                 </div>
                 <div className="replay-metrics">

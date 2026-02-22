@@ -701,3 +701,50 @@ svg {
   background: rgba(255, 107, 107, 0.3);
   color: #ff6b6b;
 }
+
+/* 現在のラップ表示 */
+.current-lap-indicator {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, rgba(202, 166, 255, 0.12), rgba(102, 194, 255, 0.08));
+  border: 1px solid rgba(202, 166, 255, 0.25);
+  border-radius: 12px;
+}
+
+.current-lap-badge {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.current-lap-label {
+  font-size: 18px;
+  font-weight: 600;
+  color: #caa6ff;
+}
+
+.current-lap-time {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lap-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 80px;
+}
+
+.lap-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #caa6ff, #66c2ff);
+  border-radius: 3px;
+  transition: width 0.1s linear;
+}
